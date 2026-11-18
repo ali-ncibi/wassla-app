@@ -1,0 +1,61 @@
+name: wassla
+
+services:
+  db:
+    build: ./db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command: ["postgres", "-c", "shared_preload_libraries=pg_cron,pg_net", "-c", "cron.database_name=${POSTGRES_DB}", "-c", "pg_net.database_name=${POSTGRES_DB}", "-c", "app.ingest_token=${INGEST_TOKEN}"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  pipeline:
+    build: ./pipeline
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build: ./web
+    environment:
+      NUXT_API_BASE: ${NUXT_API_BASE}
+    ports:
+      - "3000:3000"
+    depends_on:
+      pipeline:
+        condition: service_healthy
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_ENABLE_AUTH: "false"
+    ports:
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317" 
+    volumes:
+      - phoenix_data:/mnt/data
+
+volumes:
+  pgdata:
+  phoenix_data:
